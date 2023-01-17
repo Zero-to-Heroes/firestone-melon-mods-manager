@@ -5,6 +5,8 @@ using System;
 using UnityEngine;
 using MelonLoader.TinyJSON;
 using Newtonsoft.Json;
+using System.Collections.Generic;
+using System.Runtime.Remoting;
 
 namespace FirestoneMelonModsManager
 {
@@ -37,6 +39,7 @@ namespace FirestoneMelonModsManager
                 Registered = m.Registered,
                 Version = m.Info.Version,
                 DownloadLink = m.Info.DownloadLink,
+                AssemblyName = m.Assembly.GetName().Name,
             }));
             //FirestoneMelonModsManagerPlugin.SharedLogger.Msg(stringified);
             this.wsServer.Broadcast($"{{ \"type\": \"mods-info\", \"data\": {stringified} }}");
@@ -44,27 +47,35 @@ namespace FirestoneMelonModsManager
 
         private void OnMessage(string message)
         {
-            dynamic msg = JsonConvert.DeserializeObject(message);
-            if (msg.type == "toggle-mod")
-            { 
-                string modName = msg.modName;
+            dynamic parentMsg = JsonConvert.DeserializeObject(message);
+            var isCorrectType = parentMsg.type == "toggle-mod";
+            if (isCorrectType)
+            {
+                ToggleMessage msg = JsonConvert.DeserializeObject(message, typeof(ToggleMessage)) as ToggleMessage;
+                string[] modNames = msg.modNames;
+                var status = msg.status;
+
                 var loadedMelons = MelonAssembly.LoadedAssemblies.SelectMany(a => a.LoadedMelons).ToList();
-                var mod = loadedMelons.Find(m => m.Info.Name == modName);
-                if (mod == null)
+                foreach (var modName in modNames)
                 {
-                    FirestoneMelonModsManagerPlugin.SharedLogger.Msg($"Couldn't find loaded melon {modName} {message}");
-                    return;
-                }
-                var isRegistered = mod.Registered;
-                if (isRegistered)
-                {
-                    FirestoneMelonModsManagerPlugin.SharedLogger.Msg($"Unregistering {modName}");
-                    mod.Unregister();
-                } 
-                else
-                { 
-                    FirestoneMelonModsManagerPlugin.SharedLogger.Msg($"Registering {modName}");
-                    mod.Register();
+                    var mod = loadedMelons.Find(m => m.Assembly.GetName()?.Name == modName);
+                    if (mod == null)
+                    {
+                        FirestoneMelonModsManagerPlugin.SharedLogger.Msg($"Couldn't find loaded melon {modName} {message}");
+                        continue;
+                    }
+
+                    var isRegistered = mod.Registered;
+                    if (status == "off" || isRegistered)
+                    {
+                        FirestoneMelonModsManagerPlugin.SharedLogger.Msg($"Unregistering {modName}");
+                        mod.Unregister();
+                    }
+                    else if (status == "on" || !isRegistered)
+                    {
+                        FirestoneMelonModsManagerPlugin.SharedLogger.Msg($"Registering {modName}");
+                        mod.Register();
+                    }
                 }
                 PublishModsInfo();
             }
@@ -90,5 +101,12 @@ namespace FirestoneMelonModsManager
             FirestoneMelonModsManagerPlugin.SharedLogger.Msg($"OnApplicationStarted");
             //GetAllMods();
         }
+    }
+
+    class ToggleMessage
+    {
+        public string type;
+        public string[] modNames;
+        public string status;
     }
 }
